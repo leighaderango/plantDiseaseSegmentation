@@ -4,7 +4,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 
-def get_cropped_data(folder, target_size=(200, 200)):
+def get_cropped_data(folder, target_size=(192, 192)):
 
     images = []
     masks = []
@@ -51,4 +51,4 @@ def show_imageandmask(images, n):
     plt.tight_layout()
 
 show_imageandmask(images, 3)
-
+  

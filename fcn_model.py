@@ -1,74 +1,84 @@
 import tensorflow as tf
-import numpy as np
-import pandas as pd 
-import os
-import seaborn as sns
-import matplotlib.pyplot as plt
-import random
-import time
-
-
-# filters = channels
 
 class VGGBlock(tf.keras.layers.Layer):
-
     def __init__(self, filters, layers):
         super(VGGBlock, self).__init__()
-        self.filters = filters
-        self.layers = layers
-        self.conv_layers = [tf.keras.layers.Conv2D(filters, 3,
-                                                    padding = 'same',
-                                                      activation = 'relu') for _ in range(layers)]
-        self.max_pool = tf.keras.layers.MaxPooling2D(2, strides = 2)
+        self.conv_layers = [
+            tf.keras.layers.Conv2D(filters, 3, padding='same', activation='relu')
+            for _ in range(layers)
+        ]
+        self.pool = tf.keras.layers.MaxPooling2D(pool_size=2, strides=2)
 
-    def call(self, inputs):
-        x = inputs
+    def call(self, x):
         for conv in self.conv_layers:
             x = conv(x)
-        x = self.max_pool(x)
-        return x
-    
+        return self.pool(x), x  # Return pooled output and last conv output
 
-# VGG Architecture
-class VGG19(tf.keras.Model):
 
-    def __init__(self, num_classes, input_shape):
-        super(VGG19, self).__init__()
-
-        self.num_classes = num_classes
-        self.input_shape = input_shape
+class FCN16s(tf.keras.Model):
+    def __init__(self, num_classes):
+        super(FCN16s, self).__init__()
 
         self.block1 = VGGBlock(64, 2)
         self.block2 = VGGBlock(128, 2)
-        self.block3 = VGGBlock(256, 4) # if 3 then vgg16
+        self.block3 = VGGBlock(256, 4)
         self.block4 = VGGBlock(512, 4)
         self.block5 = VGGBlock(512, 4)
 
-        self.flatten = tf.keras.layers.Flatten()
-        self.fc1 = tf.keras.layers.Dense(4096, activation = 'relu')
-        self.fc2 = tf.keras.layers.Dense(4096, activation = 'relu')
-        self.fc3 =  tf.keras.layers.Dense(num_classes, activation = 'softmax')
+        self.conv6 = tf.keras.layers.Conv2D(4096, 7, padding='same', activation='relu')
+        self.conv7 = tf.keras.layers.Conv2D(4096, 1, activation='relu')
+
+        self.score5 = tf.keras.layers.Conv2D(num_classes, 1)
+        self.score4 = tf.keras.layers.Conv2D(num_classes, 1)
+
+        self.upsample_2x = tf.keras.layers.UpSampling2D(size=2, interpolation='bilinear')   # 6 → 12
+        self.upsample_16x = tf.keras.layers.UpSampling2D(size=16, interpolation='bilinear') # 12 → 192
+
+        self.final_activation = tf.keras.layers.Activation('softmax')
 
     def call(self, inputs):
-        x = self.block1(inputs)
-        x = self.block2(x)
-        x = self.block3(x)
-        x = self.block4(x)
-        x = self.block5(x)
+        x1_out, _ = self.block1(inputs)        # 192 → 96
+        x2_out, _ = self.block2(x1_out)        # 96 → 48
+        x3_out, _ = self.block3(x2_out)        # 48 → 24
+        x4_out, feat4 = self.block4(x3_out)    # 24 → 12
+        x5_out, _ = self.block5(x4_out)        # 12 → 6
 
-        x = self.flatten(x)
+        x = self.conv6(x5_out)
+        x = self.conv7(x)
+        s5 = self.score5(x)                   # 6×6 → num_classes
+        s4 = self.score4(x4_out)               # 12×12 → num_classes
 
-        x = self.fc1(x)
-        x = self.fc2(x)
-        x = self.fc3(x)
+        s5_up = self.upsample_2x(s5)          # 6 → 12
+        merged = tf.add(s5_up, s4)            # 12×12 skip connections
 
-        return x
+        final = self.upsample_16x(merged)     # 12 → 192
 
+        return self.final_activation(final)
 
     def build_model(self):
-        x = tf.keras.layers.Input(shape = self.input_shape)
-        return tf.keras.Model(inputs = [x], outputs = self.call(x))
+        inputs = tf.keras.Input(shape=(192, 192, 3))
+
+        # Forward pass manually using internal layers
+        x1_out, _ = self.block1(inputs)
+        x2_out, _ = self.block2(x1_out)
+        x3_out, _ = self.block3(x2_out)
+        x4_out, feat4 = self.block4(x3_out)
+        x5_out, _ = self.block5(x4_out)
+
+        x = self.conv6(x5_out)
+        x = self.conv7(x)
+        s5 = self.score5(x)
+        s4 = self.score4(x4_out)
+
+        s5_up = self.upsample_2x(s5)
+        merged = tf.keras.layers.Add()([s5_up, s4]) # skip connection
+        final = self.upsample_16x(merged)
+
+        output = self.final_activation(final)
+
+        return tf.keras.Model(inputs=inputs, outputs=output)
 
 
-vgg = VGG19(10, (224, 224, 3))
-vgg.build_model().summary()
+fcn = FCN16s(2)
+fcn.build_model().summary()
+
