@@ -1,4 +1,8 @@
 import tensorflow as tf
+import matplotlib.pyplot as plt
+import pandas as pd
+from get_images import train_dataset, val_dataset, test_dataset
+import numpy as np
 
 class VGGBlock(tf.keras.layers.Layer):
     def __init__(self, filters, layers):
@@ -12,7 +16,7 @@ class VGGBlock(tf.keras.layers.Layer):
     def call(self, x):
         for conv in self.conv_layers:
             x = conv(x)
-        return self.pool(x), x  # Return pooled output and last conv output
+        return self.pool(x), x  # pooled output and last conv output (for later use in skip connections)
 
 
 class FCN16s(tf.keras.Model):
@@ -34,7 +38,7 @@ class FCN16s(tf.keras.Model):
         self.upsample_2x = tf.keras.layers.UpSampling2D(size=2, interpolation='bilinear')   # 6 → 12
         self.upsample_16x = tf.keras.layers.UpSampling2D(size=16, interpolation='bilinear') # 12 → 192
 
-        self.final_activation = tf.keras.layers.Activation('softmax')
+        self.final_activation = tf.keras.layers.Activation('sigmoid')
 
     def call(self, inputs):
         x1_out, _ = self.block1(inputs)        # 192 → 96
@@ -79,6 +83,48 @@ class FCN16s(tf.keras.Model):
         return tf.keras.Model(inputs=inputs, outputs=output)
 
 
-fcn = FCN16s(2)
-fcn.build_model().summary()
+def iou(y_true, y_pred, smooth=1e-6):
+    y_true = tf.cast(y_true, tf.float32)
+    y_pred = tf.cast(y_pred, tf.float32)
+
+    # Flatten the tensors
+    y_true_f = tf.reshape(y_true, [-1])
+    y_pred_f = tf.reshape(y_pred, [-1])
+
+    # Compute the intersection and union
+    intersection = tf.reduce_sum(y_true_f * y_pred_f)
+    union = tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) - intersection
+
+    return (intersection + smooth) / (union + smooth)
+
+
+
+fcn = FCN16s(1)
+
+fcn.compile(optimizer = tf.keras.optimizers.Adam(1e-4),  
+                      loss = 'binary_crossentropy',
+                      metrics=['accuracy', iou])
+
+
+history = fcn.fit(train_dataset,
+                       epochs = 50,
+                       validation_data = val_dataset)
+
+
+fcn.save_weights('fcn_model.weights.h5')
+
+hist = pd.DataFrame(history.history)
+hist['epoch'] = history.epoch
+
+hist.tail(1)
+
+def plot_history(hist_):
+    plt.figure(figsize=(12, 10))
+    plt.xlabel('Epoch',fontsize=20)
+    plt.ylabel('Accuracy',fontsize=20)
+    plt.plot(hist['epoch'], hist['accuracy'], label='Train Error')
+    plt.plot(hist['epoch'], hist['val_accuracy'], label = 'Val Error')
+    plt.legend(["train", "validation"], loc="upper left", prop={'size': 20})
+
+plot_history(hist)
 
