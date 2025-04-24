@@ -46,24 +46,24 @@ images = get_cropped_data('data/images')
 # image has dimension (192, 192, 3)
 # mask has dimension (192, 192, 1)
 
-# Unpack
+
 image_data = images[0]
 mask_data = images[1]
 
-# Shuffle indices
+# shuffle indices
 total_samples = len(image_data)
 indices = np.random.permutation(total_samples)
 
-# Define split sizes
+# define split sizes
 train_split = int(0.75 * total_samples)
 val_split = int(0.85 * total_samples)
 
-# Get splits
+# split indicies
 train_idx = indices[:train_split]
 val_idx = indices[train_split:val_split]
 test_idx = indices[val_split:]
 
-# Slice data
+# slide data
 train_images, train_masks = image_data[train_idx], mask_data[train_idx]
 val_images, val_masks = image_data[val_idx], mask_data[val_idx]
 test_images, test_masks = image_data[test_idx], mask_data[test_idx]
@@ -77,7 +77,7 @@ def get_normalizing_constants(train_images):
     for img in train_images:
         num_pixels += img.shape[0] * img.shape[1]
 
-        # Sum over height and width for each channel
+        # sum over height and width for each channel
         mean += img.sum(axis=(0, 1))
         std += (img ** 2).sum(axis=(0, 1))
 
@@ -103,11 +103,11 @@ norm_val_images = normalize_datasets(val_images, val_constants)
 norm_test_images = normalize_datasets(test_images, test_constants) 
 
 
-# Create tf.data datasets
+# create tf.data datasets
 batch_size = 32
 train_dataset = tf.data.Dataset.from_tensor_slices((norm_train_images, train_masks)).batch(batch_size)
 val_dataset = tf.data.Dataset.from_tensor_slices((norm_val_images, val_masks)).batch(batch_size)
-test_dataset = tf.data.Dataset.from_tensor_slices((norm_test_images, test_masks)).batch(batch_size)
+test_dataset = tf.data.Dataset.from_tensor_slices(norm_test_images).batch(batch_size)
 
 
 

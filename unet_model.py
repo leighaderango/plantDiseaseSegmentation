@@ -1,6 +1,6 @@
 import tensorflow as tf
 from tensorflow.keras import layers
-from get_images import train_dataset, val_dataset, test_dataset
+from get_images import train_dataset, val_dataset, test_dataset, test_images, test_masks
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -11,23 +11,23 @@ class UNet(tf.keras.Model):
         super(UNet, self).__init__()
         self.num_classes = num_classes
 
-        # Encoder / Downsampling
+        # encoder
         self.down1 = self.down_block(64)
         self.down2 = self.down_block(128)
         self.down3 = self.down_block(256)
         self.down4 = self.down_block(512)
 
-        # Bottleneck
+        # bottleneck
         self.bottleneck_conv1 = layers.Conv2D(1024, 3, padding='same', activation='relu')
         self.bottleneck_conv2 = layers.Conv2D(1024, 3, padding='same', activation='relu')
 
-        # Decoder / Upsampling
+        # decoder
         self.up1 = self.up_block(512)
         self.up2 = self.up_block(256)
         self.up3 = self.up_block(128)
         self.up4 = self.up_block(64)
 
-        # Output
+        # output conv layer
         self.output_conv = layers.Conv2D(num_classes, 1, padding='same',
                                          activation='sigmoid' if num_classes == 1 else 'softmax')
 
@@ -46,7 +46,7 @@ class UNet(tf.keras.Model):
         }
 
     def call(self, inputs):
-        # Downsampling path
+        # downsampling
         c1 = self.down1["conv2"](self.down1["conv1"](inputs))
         p1 = self.down1["pool"](c1)
 
@@ -59,10 +59,10 @@ class UNet(tf.keras.Model):
         c4 = self.down4["conv2"](self.down4["conv1"](p3))
         p4 = self.down4["pool"](c4)
 
-        # Bottleneck
+        # bottleneck
         b = self.bottleneck_conv2(self.bottleneck_conv1(p4))
 
-        # Upsampling path
+        # upsampling
         u1 = self.up1["upsample"](b)
         u1 = tf.concat([u1, c4], axis=-1)
         u1 = self.up1["conv2"](self.up1["conv1"](u1))
@@ -81,18 +81,18 @@ class UNet(tf.keras.Model):
 
         return self.output_conv(u4)
 
-
+       
 
 
 def iou(y_true, y_pred, smooth=1e-6):
     y_true = tf.cast(y_true, tf.float32)
     y_pred = tf.cast(y_pred, tf.float32)
 
-    # Flatten the tensors
+    # flatten the tensors
     y_true_f = tf.reshape(y_true, [-1])
     y_pred_f = tf.reshape(y_pred, [-1])
 
-    # Compute the intersection and union
+    # compute the intersection and union
     intersection = tf.reduce_sum(y_true_f * y_pred_f)
     union = tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) - intersection
 
@@ -102,29 +102,62 @@ def iou(y_true, y_pred, smooth=1e-6):
 
 unet = UNet(num_classes = 1)
 
+#_ = unet(tf.zeros([1, 192, 192, 3]))
+#unet.summary()
+
+
 unet.compile(optimizer = tf.keras.optimizers.Adam(1e-4),  
                       loss = 'binary_crossentropy',
                       metrics=['accuracy', iou])
 
 
-history = unet.fit(train_dataset,
-                       epochs = 50,
-                       validation_data = val_dataset)
+#history = unet.fit(train_dataset,
+                       #epochs = 50,
+                       #validation_data = val_dataset)
 
-history.save_weights('unet_model.weights.h5')
+#unet.save_weights('unet_model.weights.h5')
 
-hist = pd.DataFrame(history.history)
-hist['epoch'] = history.epoch
 
-hist.tail(1)
+#hist = pd.DataFrame(history.history)
+#hist['epoch'] = history.epoch
+#hist.to_csv('unet_model_history.csv')
 
-def plot_history(hist_):
+hist = pd.read_csv('unet_model_history.csv')
+hist.columns
+print(hist.tail(1))
+
+def plot_history(hist):
     plt.figure(figsize=(12, 10))
     plt.xlabel('Epoch',fontsize=20)
-    plt.ylabel('Accuracy',fontsize=20)
-    plt.plot(hist['epoch'], hist['accuracy'], label='Train Error')
-    plt.plot(hist['epoch'], hist['val_accuracy'], label = 'Val Error')
+    plt.ylabel('IoU',fontsize=20)
+    plt.plot(hist['epoch'], hist['iou'], label='Train Error')
+    plt.plot(hist['epoch'], hist['val_iou'], label = 'Val Error')
     plt.legend(["train", "validation"], loc="upper left", prop={'size': 20})
 
 plot_history(hist)
 
+
+
+unet.build(1)
+unet.load_weights('unet_model.weights.h5')
+
+
+test_preds = unet.predict(test_dataset)
+pred_masks = (test_preds >= 0.5).astype(np.uint8)
+
+
+accuracy = np.mean([np.mean(mask == test_mask) for mask, test_mask in zip(pred_masks, test_masks)])
+ious = np.mean([iou(mask, test_mask) for mask, test_mask in zip(pred_masks, test_masks)])
+
+print(accuracy)
+print(ious)
+
+
+i =8
+plt.imshow(pred_masks[i])
+plt.show()
+plt.imshow(test_images[i]) 
+plt.show()
+plt.imshow(test_masks[i])
+plt.show()
+ 

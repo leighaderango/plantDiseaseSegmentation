@@ -1,7 +1,7 @@
 import tensorflow as tf
 import matplotlib.pyplot as plt
 import pandas as pd
-from get_images import train_dataset, val_dataset, test_dataset
+from get_images import train_dataset, val_dataset, test_dataset, test_images, test_masks
 import numpy as np
 
 class VGGBlock(tf.keras.layers.Layer):
@@ -62,7 +62,7 @@ class FCN16s(tf.keras.Model):
     def build_model(self):
         inputs = tf.keras.Input(shape=(192, 192, 3))
 
-        # Forward pass manually using internal layers
+        # forward pass
         x1_out, _ = self.block1(inputs)
         x2_out, _ = self.block2(x1_out)
         x3_out, _ = self.block3(x2_out)
@@ -87,11 +87,11 @@ def iou(y_true, y_pred, smooth=1e-6):
     y_true = tf.cast(y_true, tf.float32)
     y_pred = tf.cast(y_pred, tf.float32)
 
-    # Flatten the tensors
+    # flatten the tensors
     y_true_f = tf.reshape(y_true, [-1])
     y_pred_f = tf.reshape(y_pred, [-1])
 
-    # Compute the intersection and union
+    # compute the intersection and union
     intersection = tf.reduce_sum(y_true_f * y_pred_f)
     union = tf.reduce_sum(y_true_f) + tf.reduce_sum(y_pred_f) - intersection
 
@@ -106,6 +106,11 @@ fcn.compile(optimizer = tf.keras.optimizers.Adam(1e-4),
                       metrics=['accuracy', iou])
 
 
+fcn.build_model()
+fcn.summary()
+
+
+
 history = fcn.fit(train_dataset,
                        epochs = 50,
                        validation_data = val_dataset)
@@ -116,15 +121,41 @@ fcn.save_weights('fcn_model.weights.h5')
 hist = pd.DataFrame(history.history)
 hist['epoch'] = history.epoch
 
+hist.to_csv('fcn_model_history.csv')
+
 hist.tail(1)
 
-def plot_history(hist_):
+def plot_history(hist):
     plt.figure(figsize=(12, 10))
     plt.xlabel('Epoch',fontsize=20)
-    plt.ylabel('Accuracy',fontsize=20)
-    plt.plot(hist['epoch'], hist['accuracy'], label='Train Error')
-    plt.plot(hist['epoch'], hist['val_accuracy'], label = 'Val Error')
+    plt.ylabel('IoU',fontsize=20)
+    plt.plot(hist['epoch'], hist['iou'], label='Train Error')
+    plt.plot(hist['epoch'], hist['val_iou'], label = 'Val Error')
     plt.legend(["train", "validation"], loc="upper left", prop={'size': 20})
 
 plot_history(hist)
 
+
+fcn.load_weights('fcn_model.weights.h5')
+
+
+test_preds = fcn.predict(test_dataset)
+pred_masks = (test_preds >= 0.5).astype(np.uint8)
+
+
+accuracy = np.mean([np.mean(mask == test_mask) for mask, test_mask in zip(pred_masks, test_masks)])
+ious = np.mean([iou(mask, test_mask) for mask, test_mask in zip(pred_masks, test_masks)])
+print(ious)
+
+
+i = 2
+plt.imshow(pred_masks[i])
+plt.show()
+plt.imshow(test_images[i]) 
+plt.show()
+plt.imshow(test_masks[i])
+plt.show()
+
+
+history = pd.read_csv('fcn_model_history.csv')
+history.tail(1)
